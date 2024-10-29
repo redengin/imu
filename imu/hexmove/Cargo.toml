@@ -13,11 +13,7 @@ license.workspace = true
 [lib]
 
 name = "hexmove"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [dependencies]
-
-[[bin]]
-
-name = "hexmove"
-path = "src/bin/hexmove.rs"
+socketcan = "3.3.0"
