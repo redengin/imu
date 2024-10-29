@@ -42,7 +42,7 @@ class RustBuildExt(build_ext):
 
 
 setup(
-    name="imu",
+    name="kscale-imu",
     version=version,
     description="Python interface for interacting with IMUs",
     author="Wesley Maa",
@@ -62,7 +62,7 @@ setup(
     install_requires=requirements,
     extras_require={"dev": requirements_dev},
     include_package_data=True,
-    package_data={"imu": package_data},
+    package_data={"kscale-imu": package_data},
     packages=find_packages(include=["imu"]),
     cmdclass={"build_ext": RustBuildExt},
 )
