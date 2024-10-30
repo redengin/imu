@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use socketcan::{CANSocket, CANFrame};
+use socketcan::{CanFrame, CanSocket, Socket, StandardId, EmbeddedFrame};
 
 /// Struct to hold IMU data
 #[derive(Debug, Default, Clone)]
@@ -49,22 +49,20 @@ pub fn start_imu_thread() -> Result<(), String> {
     let number = 0x01;      // Device number
 
     // Open CAN socket
-    let can_socket = CANSocket::open("can0").map_err(|e| e.to_string())?;
+    let can_socket = CanSocket::open("can0").map_err(|e| e.to_string())?;
 
     // Send Angle Information Setting command to start data transmission every 10ms
     let angle_setting_can_id = construct_can_id(device_type, model, number, 0x11);
-    let angle_setting_frame = CANFrame::new_extended(
-        angle_setting_can_id,
+    let angle_setting_frame = CanFrame::new(
+        StandardId::new(angle_setting_can_id as u16).unwrap(),
         &[10], // 10ms update interval
-        false,
-        false,
-    ).map_err(|e| e.to_string())?;
-    can_socket.write_frame(&angle_setting_frame).map_err(|e| e.to_string())?;
+    ).unwrap();
+    can_socket.write_frame(&angle_setting_frame);
 
     // Spawn a thread to read IMU data
     thread::spawn(move || {
         // Open CAN socket in the thread
-        let can_socket = match CANSocket::open("can0") {
+        let can_socket = match CanSocket::open("can0") {
             Ok(socket) => socket,
             Err(e) => {
                 eprintln!("Failed to open CAN socket: {}", e);
@@ -76,26 +74,33 @@ pub fn start_imu_thread() -> Result<(), String> {
             // Read frame
             match can_socket.read_frame() {
                 Ok(frame) => {
-                    // Check if the frame is from the IMU with function code 0xB1 (Sensor Angle Information)
-                    let function_code = (frame.id() & 0xFF) as u8;
-                    if function_code == 0xB1 {
-                        // Parse data
-                        let data = frame.data();
-                        if data.len() >= 8 {
-                            let angle_x = i16::from_le_bytes([data[0], data[1]]) as f32 * 0.01;
-                            let angle_y = i16::from_le_bytes([data[2], data[3]]) as f32 * 0.01;
-                            let angle_z = i16::from_le_bytes([data[4], data[5]]) as f32 * 0.01;
-                            let timestamp = u16::from_le_bytes([data[6], data[7]]);
+                    match frame.id() {
+                        socketcan::Id::Standard(id) => {
+                            let function_code = (id.as_raw() & 0xFF) as u8;
+                            if function_code == 0xB1 {
+                                // Parse data
+                                let data = frame.data();
+                                if data.len() >= 8 {
+                                    let angle_x = i16::from_le_bytes([data[0], data[1]]) as f32 * 0.01;
+                                    let angle_y = i16::from_le_bytes([data[2], data[3]]) as f32 * 0.01;
+                                    let angle_z = i16::from_le_bytes([data[4], data[5]]) as f32 * 0.01;
+                                    let timestamp = u16::from_le_bytes([data[6], data[7]]);
 
-                            // Update shared IMU data
-                            unsafe {
-                                if let Some(ref imu_data) = IMU_DATA {
-                                    let mut imu_data = imu_data.lock().unwrap();
-                                    imu_data.angle_x = angle_x;
-                                    imu_data.angle_y = angle_y;
-                                    imu_data.timestamp = timestamp;
+                                    // Update shared IMU data
+                                    unsafe {
+                                        if let Some(ref imu_data) = IMU_DATA {
+                                            let mut imu_data = imu_data.lock().unwrap();
+                                            imu_data.angle_x = angle_x;
+                                            imu_data.angle_y = angle_y;
+                                            imu_data.angle_z = angle_z;
+                                            imu_data.timestamp = timestamp;
+                                        }
+                                    }
                                 }
                             }
+                        },
+                        _ => {
+                            eprintln!("Received non-standard CAN ID");
                         }
                     }
                 },
