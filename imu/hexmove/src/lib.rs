@@ -1,130 +1,95 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
-use socketcan::{CanFrame, CanSocket, Socket, StandardId, EmbeddedFrame};
+use log::{info, error};
+use socketcan::{CanDataFrame, CanFrame, CanSocket, EmbeddedFrame, ExtendedId, Id, Socket};
 
-/// Struct to hold IMU data
 #[derive(Debug, Default, Clone)]
 pub struct ImuData {
-    pub angle_x: f32,
-    pub angle_y: f32,
-    pub angle_z: f32,
-    pub timestamp: u16,
+    pub x_angle: f32,
+    pub y_angle: f32,
+    pub z_angle: f32,
+    pub x_velocity: f32,
+    pub y_velocity: f32,
+    pub z_velocity: f32,
 }
 
-impl ImuData {
-    pub fn new() -> Self {
-        ImuData {
-            angle_x: 0.0,
-            angle_y: 0.0,
-            angle_z: 0.0,
-            timestamp: 0,
-        }
-    }
+pub struct ImuReader {
+    socket: CanSocket,
+    data: Arc<RwLock<ImuData>>,
+    running: Arc<RwLock<bool>>,
 }
 
-/// Global IMU data shared between threads
-static mut IMU_DATA: Option<Arc<Mutex<ImuData>>> = None;
+impl ImuReader {
+    pub fn new(interface: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let socket = CanSocket::open(interface)?;
+        let data = Arc::new(RwLock::new(ImuData::default()));
+        let running = Arc::new(RwLock::new(true));
 
-/// Function to construct CAN ID
-fn construct_can_id(device_type: u8, model: u8, number: u8, function: u8) -> u32 {
-    ((device_type as u32) << 24)
-        | ((model as u32) << 16)
-        | ((number as u32) << 8)
-        | (function as u32)
-}
-
-/// Initialize and start the IMU thread
-pub fn start_imu_thread() -> Result<(), String> {
-    // Initialize shared IMU data
-    let imu_data = Arc::new(Mutex::new(ImuData::new()));
-
-    unsafe {
-        IMU_DATA = Some(Arc::clone(&imu_data));
-    }
-
-    // Device identifiers (modify these as per your device)
-    let device_type = 0x0B; // IMU device type
-    let model = 0x01;       // Device model
-    let number = 0x01;      // Device number
-
-    // Open CAN socket
-    let can_socket = CanSocket::open("can0").map_err(|e| e.to_string())?;
-
-    // Send Angle Information Setting command to start data transmission every 10ms
-    let angle_setting_can_id = construct_can_id(device_type, model, number, 0x11);
-    let angle_setting_frame = CanFrame::new(
-        StandardId::new(angle_setting_can_id as u16).unwrap(),
-        &[10], // 10ms update interval
-    ).unwrap();
-    can_socket.write_frame(&angle_setting_frame);
-
-    // Spawn a thread to read IMU data
-    thread::spawn(move || {
-        // Open CAN socket in the thread
-        let can_socket = match CanSocket::open("can0") {
-            Ok(socket) => socket,
-            Err(e) => {
-                eprintln!("Failed to open CAN socket: {}", e);
-                return;
-            }
+        let imu_reader = ImuReader {
+            socket,
+            data: Arc::clone(&data),
+            running: Arc::clone(&running),
         };
 
-        loop {
-            // Read frame
-            match can_socket.read_frame() {
-                Ok(frame) => {
-                    match frame.id() {
-                        socketcan::Id::Standard(id) => {
-                            let function_code = (id.as_raw() & 0xFF) as u8;
-                            if function_code == 0xB1 {
-                                // Parse data
-                                let data = frame.data();
-                                if data.len() >= 8 {
-                                    let angle_x = i16::from_le_bytes([data[0], data[1]]) as f32 * 0.01;
-                                    let angle_y = i16::from_le_bytes([data[2], data[3]]) as f32 * 0.01;
-                                    let angle_z = i16::from_le_bytes([data[4], data[5]]) as f32 * 0.01;
-                                    let timestamp = u16::from_le_bytes([data[6], data[7]]);
+        imu_reader.start_reading_thread();
 
-                                    // Update shared IMU data
-                                    unsafe {
-                                        if let Some(ref imu_data) = IMU_DATA {
-                                            let mut imu_data = imu_data.lock().unwrap();
-                                            imu_data.angle_x = angle_x;
-                                            imu_data.angle_y = angle_y;
-                                            imu_data.angle_z = angle_z;
-                                            imu_data.timestamp = timestamp;
-                                        }
-                                    }
-                                }
+        Ok(imu_reader)
+    }
+
+    fn start_reading_thread(&self) {
+        let socket = self.socket;
+        let data = Arc::clone(&self.data);
+        let running = Arc::clone(&self.running);
+
+        thread::spawn(move || {
+            while *running.read().unwrap() {
+                match socket.read_frame() {
+                    Ok(CanFrame::Data(data_frame)) => {
+                        let received_data = data_frame.data();
+                        let mut data = data.write().unwrap();
+                        match data_frame.id() {
+                            ExtendedId::new(0x0B0101B1) => {
+                                data.x_angle = i16::from_le_bytes([received_data[0], received_data[1]]) as f32 * 0.01;
+                                data.y_angle = i16::from_le_bytes([received_data[2], received_data[3]]) as f32 * 0.01;
+                                data.z_angle = i16::from_le_bytes([received_data[4], received_data[5]]) as f32 * 0.01;
+                                info!("Angular Position: X={}°, Y={}°, Z={}°", data.x_angle, data.y_angle, data.z_angle);
                             }
-                        },
-                        _ => {
-                            eprintln!("Received non-standard CAN ID");
+                            ExtendedId::new(0x0B0101B2).unwrap() => {
+                                data.x_velocity = i16::from_le_bytes([received_data[0], received_data[1]]) as f32 * 0.01;
+                                data.y_velocity = i16::from_le_bytes([received_data[2], received_data[3]]) as f32 * 0.01;
+                                data.z_velocity = i16::from_le_bytes([received_data[4], received_data[5]]) as f32 * 0.01;
+                                info!("Angular Velocity: X={}°/s, Y={}°/s, Z={}°/s", data.x_velocity, data.y_velocity, data.z_velocity);
+                            }
+                            _ => {}
                         }
                     }
-                },
-                Err(e) => {
-                    eprintln!("Error reading CAN frame: {}", e);
-                    thread::sleep(Duration::from_millis(10));
-                },
+                    Ok(CanFrame::Remote(_)) => {
+                        // Ignore remote frames
+                    }
+                    Ok(CanFrame::Error(_)) => {
+                        // Ignore error frames
+                    }
+                    Err(e) => {
+                        error!("Error reading IMU data: {}", e);
+                    }
+                }
             }
-            // Sleep briefly to prevent tight loop
-            thread::sleep(Duration::from_millis(1));
-        }
-    });
+        });
+    }
 
-    Ok(())
+    pub fn get_data(&self) -> ImuData {
+        self.data.read().unwrap().clone()
+    }
+
+    pub fn stop(&self) {
+        let mut running = self.running.write().unwrap();
+        *running = false;
+    }
 }
 
-/// Function to get the latest IMU data
-pub fn get_imu_data() -> Result<ImuData, String> {
-    unsafe {
-        if let Some(ref imu_data) = IMU_DATA {
-            let imu_data = imu_data.lock().unwrap();
-            Ok(imu_data.clone())
-        } else {
-            Err("IMU data not initialized".to_string())
-        }
+impl Drop for ImuReader {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
