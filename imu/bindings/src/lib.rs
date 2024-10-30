@@ -1,31 +1,37 @@
 use pyo3::prelude::*;
 use pyo3_stub_gen::define_stub_info_gatherer;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
-use hexmove::{start_imu_thread as hexmove_start_imu_thread, get_imu_data as hexmove_get_imu_data, ImuData as HexmoveImuData};
+use hexmove::{ImuData as HexmoveImuData, ImuReader as HexmoveImuReader};
 use std::sync::{Arc, Mutex};
 
 #[gen_stub_pyclass]
 #[pyclass]
-struct PyHexmoveIMU {
-    imu_data: Arc<Mutex<HexmoveImuData>>,
+struct PyHexmoveImuReader {
+    inner: Arc<Mutex<HexmoveImuReader>>,
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl PyHexmoveIMU {
+impl PyHexmoveImuReader {
     #[new]
-    fn new() -> PyResult<Self> {
-        hexmove_start_imu_thread().map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-        let imu_data = Arc::new(Mutex::new(HexmoveImuData::new()));
-        Ok(PyHexmoveIMU { imu_data })
+    fn new(interface: String, serial_number: u8, model: u8) -> PyResult<Self> {
+        let imu_reader = HexmoveImuReader::new(&interface, serial_number, model)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        Ok(PyHexmoveImuReader {
+            inner: Arc::new(Mutex::new(imu_reader)),
+        })
     }
 
-    fn get_imu_data(&self) -> PyResult<PyHexmoveImuData> {
-        hexmove_get_imu_data().map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string())).map(|data| data.into())
+    fn get_data(&self) -> PyResult<PyHexmoveImuData> {
+        let imu_reader = self.inner.lock().unwrap();
+        let data = imu_reader.get_data();
+        Ok(PyHexmoveImuData::from(data))
     }
 
-    fn __repr__(&self) -> PyResult<String> {
-        Ok(format!("PyHexmoveIMU"))
+    fn stop(&self) -> PyResult<()> {
+        let imu_reader = self.inner.lock().unwrap();
+        imu_reader.stop();
+        Ok(())
     }
 }
 
@@ -34,38 +40,37 @@ impl PyHexmoveIMU {
 #[derive(Clone)]
 struct PyHexmoveImuData {
     #[pyo3(get)]
-    angle_x: f32,
+    x_angle: f32,
     #[pyo3(get)]
-    angle_y: f32,
+    y_angle: f32,
     #[pyo3(get)]
-    angle_z: f32,
+    z_angle: f32,
     #[pyo3(get)]
-    timestamp: u16,
-}
-
-#[gen_stub_pymethods]
-#[pymethods]
-impl PyHexmoveImuData {
-    fn __repr__(&self) -> PyResult<String> {
-        Ok(format!(
-            "ImuData(angle_x={:.2}, angle_y={:.2}, angle_z={:.2}, timestamp={})",
-            self.angle_x, self.angle_y, self.angle_z, self.timestamp
-        ))
-    }
+    x_velocity: f32,
+    #[pyo3(get)]
+    y_velocity: f32,
+    #[pyo3(get)]
+    z_velocity: f32,
 }
 
 impl From<HexmoveImuData> for PyHexmoveImuData {
     fn from(data: HexmoveImuData) -> Self {
-        PyHexmoveImuData { angle_x: data.angle_x, angle_y: data.angle_y, angle_z: data.angle_z, timestamp: data.timestamp }
+        PyHexmoveImuData {
+            x_angle: data.x_angle,
+            y_angle: data.y_angle,
+            z_angle: data.z_angle,
+            x_velocity: data.x_velocity,
+            y_velocity: data.y_velocity,
+            z_velocity: data.z_velocity,
+        }
     }
 }
 
 #[pymodule]
 fn bindings(m: &Bound<PyModule>) -> PyResult<()> {
-    m.add_class::<PyHexmoveIMU>()?;
+    m.add_class::<PyHexmoveImuReader>()?;
     m.add_class::<PyHexmoveImuData>()?;
     Ok(())
 }
 
 define_stub_info_gatherer!(stub_info);
-
