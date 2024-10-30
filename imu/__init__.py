@@ -3,6 +3,6 @@
 __version__ = "0.0.1"
 
 from .bindings import (
-    PyHexmoveImuReader as HexmoveImuReader,
     PyHexmoveImuData as HexmoveImuData,
+    PyHexmoveImuReader as HexmoveImuReader,
 )

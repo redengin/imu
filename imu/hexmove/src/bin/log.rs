@@ -17,7 +17,12 @@ fn main() {
         let data = imu_reader.get_data();
         println!(
             "Angular Position: X={}°, Y={}°, Z={}° | Angular Velocity: X={}°/s, Y={}°/s, Z={}°/s",
-            data.x_angle, data.y_angle, data.z_angle, data.x_velocity, data.y_velocity, data.z_velocity
+            data.x_angle,
+            data.y_angle,
+            data.z_angle,
+            data.x_velocity,
+            data.y_velocity,
+            data.z_velocity
         );
 
         // Sleep for a short duration to avoid spamming the console

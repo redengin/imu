@@ -40,7 +40,7 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 
-module = ["actuator.bindings"]
+module = ["imu.bindings"]
 
 disable_error_code = ["no-untyped-def"]
 
@@ -73,7 +73,7 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 [tool.ruff.lint.isort]
 
-known-first-party = ["actuator", "tests"]
+known-first-party = ["imu", "tests"]
 combine-as-imports = true
 
 [tool.ruff.lint.pydocstyle]

@@ -1,7 +1,7 @@
-use std::sync::{Arc, RwLock};
-use std::thread;
 use log::error;
 use socketcan::{CanFrame, CanSocket, EmbeddedFrame, ExtendedId, Id, Socket};
+use std::sync::{Arc, RwLock};
+use std::thread;
 
 #[derive(Debug, Default, Clone)]
 pub struct ImuData {
@@ -20,7 +20,11 @@ pub struct ImuReader {
 }
 
 impl ImuReader {
-    pub fn new(interface: &str, serial_number: u8, model: u8) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(
+        interface: &str,
+        serial_number: u8,
+        model: u8,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let socket = Arc::new(CanSocket::open(interface)?);
         let data = Arc::new(RwLock::new(ImuData::default()));
         let running = Arc::new(RwLock::new(true));
@@ -48,12 +52,19 @@ impl ImuReader {
                         let received_data = data_frame.data();
                         let id = data_frame.id();
 
-                        let base_id = 0x0B000000 | (serial_number as u32) << 16 | (model as u32) << 8;
+                        let base_id =
+                            0x0B000000 | (serial_number as u32) << 16 | (model as u32) << 8;
 
                         if id == Id::Extended(ExtendedId::new(base_id | 0xB1).unwrap()) {
-                            let x_angle = i16::from_le_bytes([received_data[0], received_data[1]]) as f32 * 0.01;
-                            let y_angle = i16::from_le_bytes([received_data[2], received_data[3]]) as f32 * 0.01;
-                            let z_angle = i16::from_le_bytes([received_data[4], received_data[5]]) as f32 * 0.01;
+                            let x_angle = i16::from_le_bytes([received_data[0], received_data[1]])
+                                as f32
+                                * 0.01;
+                            let y_angle = i16::from_le_bytes([received_data[2], received_data[3]])
+                                as f32
+                                * 0.01;
+                            let z_angle = i16::from_le_bytes([received_data[4], received_data[5]])
+                                as f32
+                                * 0.01;
 
                             let mut imu_data = data.write().unwrap();
                             imu_data.x_angle = x_angle;
@@ -62,9 +73,15 @@ impl ImuReader {
                         }
 
                         if id == Id::Extended(ExtendedId::new(base_id | 0xB2).unwrap()) {
-                            let x_velocity = i16::from_le_bytes([received_data[0], received_data[1]]) as f32 * 0.01;
-                            let y_velocity = i16::from_le_bytes([received_data[2], received_data[3]]) as f32 * 0.01;
-                            let z_velocity = i16::from_le_bytes([received_data[4], received_data[5]]) as f32 * 0.01;
+                            let x_velocity =
+                                i16::from_le_bytes([received_data[0], received_data[1]]) as f32
+                                    * 0.01;
+                            let y_velocity =
+                                i16::from_le_bytes([received_data[2], received_data[3]]) as f32
+                                    * 0.01;
+                            let z_velocity =
+                                i16::from_le_bytes([received_data[4], received_data[5]]) as f32
+                                    * 0.01;
 
                             let mut imu_data = data.write().unwrap();
                             imu_data.x_velocity = x_velocity;
