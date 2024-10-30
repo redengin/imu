@@ -31,6 +31,11 @@ def data_receiver(bus, x_angle_data, y_angle_data, z_angle_data, x_velocity_data
                     z_angle_data.append(z_angle)
                     timestamps_angle.append(current_time)
 
+                    x_angle_data.pop(0)
+                    y_angle_data.pop(0)
+                    z_angle_data.pop(0)
+                    timestamps_angle.pop(0)
+
                 if message.arbitration_id == 0x0B0101B2:
                     x_velocity = int.from_bytes(message.data[0:2], byteorder='little', signed=True) * 0.01
                     y_velocity = int.from_bytes(message.data[2:4], byteorder='little', signed=True) * 0.01
@@ -39,6 +44,11 @@ def data_receiver(bus, x_angle_data, y_angle_data, z_angle_data, x_velocity_data
                     y_velocity_data.append(y_velocity)
                     z_velocity_data.append(z_velocity)
                     timestamps_velocity.append(current_time)
+
+                    x_velocity_data.pop(0)
+                    y_velocity_data.pop(0)
+                    z_velocity_data.pop(0)
+                    timestamps_velocity.pop(0)
 
     except Exception as e:
         print(f"Error receiving IMU data: {e}")
@@ -54,28 +64,16 @@ def plot_data(x_angle_data, y_angle_data, z_angle_data, x_velocity_data, y_veloc
                 ax1.clear()
                 ax2.clear()
 
-                flat_x_angle = [x for x in x_angle_data]
-                flat_y_angle = [y for y in y_angle_data]
-                flat_z_angle = [z for z in z_angle_data]
-
-                flat_timestamps_angle = [x for x in timestamps_angle]
-
-                flat_timestamps_velocity = [x for x in timestamps_velocity]
-
-                ax1.plot(flat_timestamps_angle, flat_x_angle, label='X Angle')
-                ax1.plot(flat_timestamps_angle, flat_y_angle, label='Y Angle')
-                ax1.plot(flat_timestamps_angle, flat_z_angle, label='Z Angle')
+                ax1.plot(timestamps_angle, x_angle_data, label='X Angle')
+                ax1.plot(timestamps_angle, y_angle_data, label='Y Angle')
+                ax1.plot(timestamps_angle, z_angle_data, label='Z Angle')
                 ax1.set_title('Angular Position')
                 ax1.set_ylabel('Degrees')
                 ax1.legend()
 
-                flat_x_velocity = [x for x in x_velocity_data]
-                flat_y_velocity = [y for y in y_velocity_data]
-                flat_z_velocity = [z for z in z_velocity_data]
-
-                ax2.plot(flat_timestamps_velocity, flat_x_velocity, label='X Velocity')
-                ax2.plot(flat_timestamps_velocity, flat_y_velocity, label='Y Velocity')
-                ax2.plot(flat_timestamps_velocity, flat_z_velocity, label='Z Velocity')
+                ax2.plot(timestamps_velocity, x_velocity_data, label='X Velocity')
+                ax2.plot(timestamps_velocity, y_velocity_data, label='Y Velocity')
+                ax2.plot(timestamps_velocity, z_velocity_data, label='Z Velocity')
                 ax2.set_title('Angular Velocity')
                 ax2.set_ylabel('Degrees/s')
                 ax2.set_xlabel('Time (s)')
@@ -93,14 +91,14 @@ def main():
     bus = setup_can_interface()
     if bus:
         time_window = 10
-        x_angle_data = deque(maxlen=time_window * 10)
-        y_angle_data = deque(maxlen=time_window * 10)
-        z_angle_data = deque(maxlen=time_window * 10)
-        x_velocity_data = deque(maxlen=time_window * 10)
-        y_velocity_data = deque(maxlen=time_window * 10)
-        z_velocity_data = deque(maxlen=time_window * 10)
-        timestamps_angle = deque(maxlen=time_window * 10)
-        timestamps_velocity = deque(maxlen=time_window * 10)
+        x_angle_data = [0] * time_window * 10
+        y_angle_data = [0] * time_window * 10
+        z_angle_data = [0] * time_window * 10
+        x_velocity_data = [0] * time_window * 10
+        y_velocity_data = [0] * time_window * 10
+        z_velocity_data = [0] * time_window * 10
+        timestamps_angle = [0] * time_window * 10
+        timestamps_velocity = [0] * time_window * 10
 
         # Start the data receiving thread
         data_thread = threading.Thread(target=data_receiver, args=(bus, x_angle_data, y_angle_data, z_angle_data, x_velocity_data, y_velocity_data, z_velocity_data, timestamps_angle, timestamps_velocity))
