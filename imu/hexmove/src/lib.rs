@@ -49,7 +49,17 @@ impl ImuReader {
         let socket = Arc::clone(&self.socket);
 
         thread::spawn(move || {
-            while *running.read().unwrap() {
+            loop {
+                // Check if we should continue running
+                if let Ok(guard) = running.read() {
+                    if !*guard {
+                        break;
+                    }
+                } else {
+                    error!("Failed to acquire read lock");
+                    break;
+                }
+
                 match socket.read_frame() {
                     Ok(CanFrame::Data(data_frame)) => {
                         let received_data = data_frame.data();
@@ -58,38 +68,52 @@ impl ImuReader {
                         let base_id =
                             0x0B000000 | (serial_number as u32) << 16 | (model as u32) << 8;
 
-                        if id == Id::Extended(ExtendedId::new(base_id | 0xB1).unwrap()) {
-                            let x_angle = i16::from_le_bytes([received_data[0], received_data[1]])
-                                as f32
-                                * 0.01;
-                            let y_angle = i16::from_le_bytes([received_data[2], received_data[3]])
-                                as f32
-                                * 0.01;
-                            let z_angle = i16::from_le_bytes([received_data[4], received_data[5]])
-                                as f32
-                                * 0.01;
+                        if let Some(ext_id) = ExtendedId::new(base_id | 0xB1) {
+                            if id == Id::Extended(ext_id) {
+                                let x_angle =
+                                    i16::from_le_bytes([received_data[0], received_data[1]]) as f32
+                                        * 0.01;
+                                let y_angle =
+                                    i16::from_le_bytes([received_data[2], received_data[3]]) as f32
+                                        * 0.01;
+                                let z_angle =
+                                    i16::from_le_bytes([received_data[4], received_data[5]]) as f32
+                                        * 0.01;
 
-                            let mut imu_data = data.write().unwrap();
-                            imu_data.x_angle = x_angle;
-                            imu_data.y_angle = y_angle;
-                            imu_data.z_angle = z_angle;
+                                if let Ok(mut imu_data) = data.write() {
+                                    imu_data.x_angle = x_angle;
+                                    imu_data.y_angle = y_angle;
+                                    imu_data.z_angle = z_angle;
+                                } else {
+                                    error!("Failed to write to IMU data");
+                                }
+                            }
+                        } else {
+                            error!("Failed to create extended ID for IMU data");
                         }
 
-                        if id == Id::Extended(ExtendedId::new(base_id | 0xB2).unwrap()) {
-                            let x_velocity =
-                                i16::from_le_bytes([received_data[0], received_data[1]]) as f32
-                                    * 0.01;
-                            let y_velocity =
-                                i16::from_le_bytes([received_data[2], received_data[3]]) as f32
-                                    * 0.01;
-                            let z_velocity =
-                                i16::from_le_bytes([received_data[4], received_data[5]]) as f32
-                                    * 0.01;
+                        if let Some(ext_id) = ExtendedId::new(base_id | 0xB2) {
+                            if id == Id::Extended(ext_id) {
+                                let x_velocity =
+                                    i16::from_le_bytes([received_data[0], received_data[1]]) as f32
+                                        * 0.01;
+                                let y_velocity =
+                                    i16::from_le_bytes([received_data[2], received_data[3]]) as f32
+                                        * 0.01;
+                                let z_velocity =
+                                    i16::from_le_bytes([received_data[4], received_data[5]]) as f32
+                                        * 0.01;
 
-                            let mut imu_data = data.write().unwrap();
-                            imu_data.x_velocity = x_velocity;
-                            imu_data.y_velocity = y_velocity;
-                            imu_data.z_velocity = z_velocity;
+                                if let Ok(mut imu_data) = data.write() {
+                                    imu_data.x_velocity = x_velocity;
+                                    imu_data.y_velocity = y_velocity;
+                                    imu_data.z_velocity = z_velocity;
+                                } else {
+                                    error!("Failed to write to IMU data");
+                                }
+                            }
+                        } else {
+                            error!("Failed to create extended ID for IMU velocity data");
                         }
                     }
                     Ok(CanFrame::Remote(_)) => {
@@ -106,27 +130,35 @@ impl ImuReader {
         });
     }
 
-    pub fn get_data(&self) -> ImuData {
-        self.data.read().unwrap().clone()
+    pub fn get_data(&self) -> Result<ImuData, String> {
+        let imu_data = self
+            .data
+            .read()
+            .map_err(|e| format!("Failed to acquire read lock: {}", e))?;
+        Ok(imu_data.clone())
     }
 
-    pub fn get_angles(&self) -> (f32, f32, f32) {
-        let data = self.get_data();
-        (
+    pub fn get_angles(&self) -> Result<(f32, f32, f32), String> {
+        let data = self.get_data()?;
+        Ok((
             data.x_angle - data.x_angle_offset,
             data.y_angle - data.y_angle_offset,
             data.z_angle - data.z_angle_offset,
-        )
+        ))
     }
 
-    pub fn get_velocities(&self) -> (f32, f32, f32) {
-        let data = self.get_data();
-        (data.x_velocity, data.y_velocity, data.z_velocity)
+    pub fn get_velocities(&self) -> Result<(f32, f32, f32), String> {
+        let data = self.get_data()?;
+        Ok((data.x_velocity, data.y_velocity, data.z_velocity))
     }
 
-    pub fn stop(&self) {
-        let mut running = self.running.write().unwrap();
+    pub fn stop(&self) -> Result<(), String> {
+        let mut running = self
+            .running
+            .write()
+            .map_err(|e| format!("Failed to acquire write lock: {}", e))?;
         *running = false;
+        Ok(())
     }
 
     pub fn zero_imu(
@@ -147,7 +179,7 @@ impl ImuReader {
 
             // Collect samples
             for _ in 0..samples {
-                let data = self.get_data();
+                let data = self.get_data()?;
                 x_samples.push(data.x_angle);
                 y_samples.push(data.y_angle);
                 z_samples.push(data.z_angle);
@@ -174,7 +206,12 @@ impl ImuReader {
             let z_offset = z_samples.iter().sum::<f32>() / samples as f32;
 
             // Update offsets
-            let mut imu_data = self.data.write().unwrap();
+
+            let mut imu_data = self
+                .data
+                .write()
+                .map_err(|e| format!("Failed to acquire write lock: {}", e))?;
+
             imu_data.x_angle_offset = x_offset;
             imu_data.y_angle_offset = y_offset;
             imu_data.z_angle_offset = z_offset;
@@ -200,6 +237,6 @@ fn calculate_variance(x: &[f32], y: &[f32], z: &[f32]) -> (f32, f32, f32) {
 
 impl Drop for ImuReader {
     fn drop(&mut self) {
-        self.stop();
+        let _ = self.stop();
     }
 }
