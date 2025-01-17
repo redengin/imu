@@ -20,7 +20,6 @@ impl From<serialport::Error> for ImuError {
     fn from(error: serialport::Error) -> Self {
         ImuError::SerialError(error)
     }
-
 }
 
 impl std::fmt::Display for ImuError {
@@ -60,7 +59,6 @@ pub struct IMU {
     quaternion: [f32; 4],
 }
 
-
 impl IMU {
     pub fn new(interface: &str, baud_rate: u32) -> Result<Self, ImuError> {
         let port = serialport::new(interface, baud_rate)
@@ -87,7 +85,6 @@ impl IMU {
     }
 
     fn initialize(&mut self) -> Result<(), ImuError> {
-
         // * Set IMU Parameters to Read
         // Commands as vectors
         let unlock_cmd = vec![0xFF, 0xAA, 0x69, 0x88, 0xB5];
@@ -104,9 +101,8 @@ impl IMU {
         self.write_command(&config_cmd)?;
         self.write_command(&save_cmd)?;
 
-
-        // * Set IMU Freq 
-        // RATE (0x03) Hz: 0x01=0.2, 0x02=0.5, 0x03=1, 0x04=2, 0x05=5, 0x06=10, 
+        // * Set IMU Freq
+        // RATE (0x03) Hz: 0x01=0.2, 0x02=0.5, 0x03=1, 0x04=2, 0x05=5, 0x06=10,
         //0x07=20, 0x08=50, 0x09=100, 0x0B=200hz, 0x0C=Single, 0x0D=None
         let freq_cmd = vec![0xFF, 0xAA, 0x03, 0x04, 0x00]; // 0x0B 200hz
         self.write_command(&freq_cmd)?;
@@ -171,7 +167,7 @@ impl IMU {
                         }
                     }
                 }
-                // 11 bytes per packet for all, including the SOF. 
+                // 11 bytes per packet for all, including the SOF.
                 FrameState::Acc => {
                     if self.byte_num < 10 {
                         self.acc_data[self.byte_num - 2] = data;

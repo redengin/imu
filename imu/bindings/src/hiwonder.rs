@@ -21,7 +21,12 @@ struct PyImuData {
 #[pymethods]
 impl PyImuData {
     #[new]
-    fn new(accelerometer: Vec<f32>, gyroscope: Vec<f32>, angle: Vec<f32>, quaternion: Vec<f32>) -> Self {
+    fn new(
+        accelerometer: Vec<f32>,
+        gyroscope: Vec<f32>,
+        angle: Vec<f32>,
+        quaternion: Vec<f32>,
+    ) -> Self {
         Self {
             accelerometer,
             gyroscope,
@@ -56,19 +61,15 @@ impl PyHiwonderImu {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
         match imu.read_data() {
-            Ok(Some((accel, gyro, angle, quat))) => {
-                Python::with_gil(|py| {
-                    let data = PyImuData::new(
-                        accel.to_vec(),
-                        gyro.to_vec(),
-                        angle.to_vec(),
-                        quat.to_vec()
-                    );
-                    Ok(Some(Py::new(py, data)?.into_py(py)))
-                })
-            }
+            Ok(Some((accel, gyro, angle, quat))) => Python::with_gil(|py| {
+                let data =
+                    PyImuData::new(accel.to_vec(), gyro.to_vec(), angle.to_vec(), quat.to_vec());
+                Ok(Some(Py::new(py, data)?.into_py(py)))
+            }),
             Ok(None) => Ok(None),
-            Err(e) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+            Err(e) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                e.to_string(),
+            )),
         }
     }
 }

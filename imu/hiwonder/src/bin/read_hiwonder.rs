@@ -35,13 +35,13 @@ impl From<([f32; 3], [f32; 3], [f32; 3], [f32; 4])> for IMUData {
             quaternion_y: quaternion[1],
             quaternion_z: quaternion[2],
             quaternion_w: quaternion[3],
-
         }
     }
 }
 
 fn main() -> io::Result<()> {
-    let mut imu = IMU::new("/dev/ttyUSB0", 9600).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let mut imu =
+        IMU::new("/dev/ttyUSB0", 9600).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
     loop {
         match imu.read_data() {
