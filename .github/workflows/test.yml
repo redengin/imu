@@ -21,6 +21,11 @@ jobs:
   run-base-tests:
     timeout-minutes: 10
     runs-on: ubuntu-latest
+    env:
+      PYO3_PYTHON: /opt/hostedtoolcache/Python/3.11.11/x64/bin/python3.11
+      PYTHON_INCLUDE_DIR: /opt/hostedtoolcache/Python/3.11.11/x64/include/python3.11
+      PYTHON_LIB_DIR: /opt/hostedtoolcache/Python/3.11.11/x64/lib
+      LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.11/x64/lib:$LD_LIBRARY_PATH
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
@@ -32,8 +37,12 @@ jobs:
 
       - name: Install system dependencies
         run: |
+          sudo add-apt-repository ppa:deadsnakes/ppa
           sudo apt-get update
-          sudo apt-get install -y libudev-dev pkg-config
+          sudo apt-get install -y libudev-dev pkg-config python3.11-dev libpython3.11-dev
+          # Create symlinks to ensure libraries are found
+          sudo ln -sf /opt/hostedtoolcache/Python/3.11.11/x64/lib/libpython3.11.so /usr/lib/
+          sudo ln -sf /opt/hostedtoolcache/Python/3.11.11/x64/lib/libpython3.11.so.1.0 /usr/lib/
 
       - name: Restore cache
         id: restore-cache
@@ -42,10 +51,10 @@ jobs:
           path: |
             ${{ env.pythonLocation }}
             .mypy_cache/
-          key: python-requirements-${{ env.pythonLocation }}-${{ github.event.pull_request.base.sha || github.sha }}
+          key: new-python-requirements-${{ env.pythonLocation }}-${{ github.event.pull_request.base.sha || github.sha }}
           restore-keys: |
-            python-requirements-${{ env.pythonLocation }}
-            python-requirements-
+            new-python-requirements-${{ env.pythonLocation }}
+            new-python-requirements-
 
       - name: Install package
         run: |
