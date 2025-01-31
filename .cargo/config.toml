@@ -1,28 +1,18 @@
-[target.aarch64-apple-darwin]
+[build]
+rustflags = ["--cfg", "tokio_unstable"]
 
+[target.aarch64-apple-darwin]
 rustflags = [
   "-C", "link-arg=-undefined",
   "-C", "link-arg=dynamic_lookup",
 ]
 
 [target.aarch64-unknown-linux-gnu]
-
 linker = "aarch64-linux-gnu-gcc"
-
-[target.riscv64gc-unknown-linux-musl]
 rustflags = [
-    "-C", "target-feature=-crt-static",
-    "-Clink-args=--sysroot=/sdk/host/riscv64-buildroot-linux-musl/sysroot",
-    "-L", "../runtime/firmware/cviwrapper",
-    "-L", "../runtime/firmware/sts3215",
-    "-L", "../runtime/firmware/tpu-sdk-sg200x/lib",
-    "-L", "../runtime/firmware/duo-sdk/rootfs/usr/lib",
-    "-L", "../runtime/models/tpu-mlir/lib",
-    "-Clink-arg=-Wl,-rpath,../runtime/models/tpu-mlir/lib",
-    "-Clink-arg=-Wl,-rpath,../runtime/firmware/tpu-sdk-sg200x/lib",
-    "-Clink-arg=-Wl,-rpath,../runtime/firmware/duo-sdk/rootfs/lib",
-    "-Clink-arg=-Wl,-rpath,../runtime/tpu-libs",
-    "-Clink-arg=-Wl,-rpath,../runtime/sysroot/lib",
-    "-Clink-arg=-Wl,-rpath,../runtime/sysroot/usr/lib",
+    "-C", "link-arg=-lpython3.11",
+    "-C", "link-arg=-L/usr/lib/python3.11/config-3.11-aarch64-linux-gnu",
 ]
-linker = "/sdk/host/bin/riscv64-buildroot-linux-musl-gcc.br_real"
+
+[env]
+PYO3_PYTHON = "/usr/bin/python3"
