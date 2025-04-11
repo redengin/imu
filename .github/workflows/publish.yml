@@ -91,7 +91,7 @@ jobs:
             dist/*.whl
 
   build-source-dist:
-    name: Build and publish Python package (source distribution)
+    name: Build Python package (source distribution)
     timeout-minutes: 10
     runs-on: ubuntu-latest
 
