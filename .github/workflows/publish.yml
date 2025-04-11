@@ -6,15 +6,15 @@ on:
   workflow_dispatch:
     inputs:
       publish_imu:
-        description: 'Publish imu package'
+        description: "Publish imu package"
         type: boolean
         default: false
       publish_hexmove:
-        description: 'Publish hexmove package'
+        description: "Publish hexmove package"
         type: boolean
         default: false
       publish_hiwonder:
-        description: 'Publish hiwonder package'
+        description: "Publish hiwonder package"
         type: boolean
         default: false
 
@@ -84,7 +84,7 @@ jobs:
           cibuildwheel --output-dir dist
 
       - name: Upload wheel artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.arch }}
           path: |
@@ -120,7 +120,7 @@ jobs:
           python -m build --sdist --outdir dist
 
       - name: Upload source distribution
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: source-dist
           path: |
@@ -134,7 +134,7 @@ jobs:
 
     steps:
       - name: Download all wheels
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: dist
 
