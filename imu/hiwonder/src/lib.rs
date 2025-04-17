@@ -306,10 +306,10 @@ impl IMU {
     }
 
     fn get_quaternion(datahex: &[u8; 8]) -> [f32; 4] {
-        let quaternion_x = i16::from(datahex[1]) << 8 | i16::from(datahex[0]);
-        let quaternion_y = i16::from(datahex[3]) << 8 | i16::from(datahex[2]);
-        let quaternion_z = i16::from(datahex[5]) << 8 | i16::from(datahex[4]);
-        let quaternion_w = i16::from(datahex[7]) << 8 | i16::from(datahex[6]);
+        let quaternion_w = i16::from(datahex[1]) << 8 | i16::from(datahex[0]);
+        let quaternion_x = i16::from(datahex[3]) << 8 | i16::from(datahex[2]);
+        let quaternion_y = i16::from(datahex[5]) << 8 | i16::from(datahex[4]);
+        let quaternion_z = i16::from(datahex[7]) << 8 | i16::from(datahex[6]);
 
         [
             quaternion_x as f32 / 32768.0,
