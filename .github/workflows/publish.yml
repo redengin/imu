@@ -73,13 +73,12 @@ jobs:
           CIBW_ARCHS_LINUX: ${{ matrix.arch }}
           CIBW_BEFORE_ALL_LINUX: |
             yum install -y epel-release
-            yum install -y libudev-devel pkgconfig python3-devel python3-pip python3-wheel
-            if [ "$(uname -m)" = "aarch64" ]; then
-              yum install -y gcc-aarch64-linux-gnu glibc-devel.aarch64 libgcc.aarch64 glibc-static.aarch64
-            fi
+            yum install -y libudev-devel pkgconfig python3-devel
           CIBW_BEFORE_BUILD: |
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             export PATH="$HOME/.cargo/bin:$PATH"
+            rustup target add aarch64-unknown-linux-gnu
+            rustup target add s390x-unknown-linux-gnu
             pip install setuptools-rust
           CIBW_ENVIRONMENT: |
             PATH="/usr/local/bin:$HOME/.cargo/bin:$PATH"
