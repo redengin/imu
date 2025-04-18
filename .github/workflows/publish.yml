@@ -72,7 +72,7 @@ jobs:
           CIBW_SKIP: ${{ matrix.skip }}
           CIBW_ARCHS_LINUX: ${{ matrix.arch }}
           CIBW_BEFORE_ALL_LINUX: |
-            yum install -y libudev-devel pkgconfig python3-devel python3-pip python3-wheel
+            yum install -y libudev-devel pkgconfig python3-devel python3-pip python3-wheel gcc-aarch64-linux-gnu
           CIBW_BEFORE_BUILD: |
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             export PATH="$HOME/.cargo/bin:$PATH"
