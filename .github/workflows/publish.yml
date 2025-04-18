@@ -77,20 +77,21 @@ jobs:
           CIBW_BEFORE_BUILD: |
             # Installs Rust and setuptools-rust
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-            export PATH="$HOME/.cargo/bin:$PATH"
+            # Source the cargo env to make cargo available *within this script* if needed
+            source "$HOME/.cargo/env"
             pip install setuptools-rust
-            # Conditionally add devtoolset to PATH only for aarch64
-            # uname -m will report the architecture *inside* the container
+            # Conditionally add aarch64 linker path for commands *within this script*
             if [[ "$(uname -m)" == "aarch64" ]]; then
-              echo "Adding aarch64 devtoolset path..."
+              echo "Adding aarch64 devtoolset path for BEFORE_BUILD commands..."
               export PATH="/opt/rh/devtoolset-10/root/usr/bin:$PATH"
             fi
-            # NOTE: You might need a similar check for s390x if it also fails later,
-            # potentially with a different devtoolset path.
           CIBW_ENVIRONMENT: |
-            # PATH modification is now handled conditionally in CIBW_BEFORE_BUILD
-            # Keep only universally needed env vars here
+            # Ensure $HOME/.cargo/bin is in the PATH for the actual build environment
+            # Use {pathsep} and {env_standard_path} provided by cibuildwheel
+            PATH="$HOME/.cargo/bin{pathsep}{env_standard_path}"
             CARGO_NET_GIT_FETCH_WITH_CLI=true
+            # Note: We might need to conditionally add the aarch64 path here too,
+            # but let's confirm this fixes x86_64 first.
         run: |
           echo "--- Current PATH ---"
           echo $PATH
