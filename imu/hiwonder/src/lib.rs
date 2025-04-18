@@ -44,6 +44,7 @@ enum FrameState {
     Gyro,
     Angle,
     Quaternion,
+    Mag,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -90,10 +91,13 @@ pub struct IMU {
     gyro_data: [u8; 8],
     angle_data: [u8; 8],
     quaternion_data: [u8; 8],
+    mag_data: [u8; 8],
     acc: [f32; 3],
     gyro: [f32; 3],
     angle: [f32; 3],
     quaternion: [f32; 4],
+    mag: [f32; 3],
+    temp: f32,
 }
 
 impl IMU {
@@ -111,10 +115,13 @@ impl IMU {
             gyro_data: [0u8; 8],
             angle_data: [0u8; 8],
             quaternion_data: [0u8; 8],
+            mag_data: [0u8; 8],
             acc: [0.0; 3],
             gyro: [0.0; 3],
             angle: [0.0; 3],
             quaternion: [0.0; 4],
+            mag: [0.0; 3],
+            temp: 0.0,
         };
 
         imu.initialize()?;
@@ -125,7 +132,11 @@ impl IMU {
         // * Set IMU Parameters to Read
         // Commands as vectors
         let unlock_cmd = vec![0xFF, 0xAA, 0x69, 0x88, 0xB5];
-        let config_cmd = vec![0xFF, 0xAA, 0x02, 0x0E, 0x02];
+        // Enable Acceleration (0x02), Gyro (0x04), Angle (0x08), Mag (0x10), and Quaternion (0x0200)
+        // Low byte: 0x02 | 0x04 | 0x08 | 0x10 = 0x1E
+        // High byte: 0x02
+        // let config_cmd = vec![0xFF, 0xAA, 0x02, 0x1E, 0x02];
+        let config_cmd = vec![0xFF, 0xAA, 0x02, 0xFF, 0x07]; // 0x07FF = all bits set
         let save_cmd = vec![0xFF, 0xAA, 0x00, 0x00, 0x00];
 
         // Alternative:
@@ -156,14 +167,23 @@ impl IMU {
         Ok(())
     }
 
-    pub fn read_data(&mut self) -> io::Result<Option<([f32; 3], [f32; 3], [f32; 3], [f32; 4])>> {
+    pub fn read_data(
+        &mut self,
+    ) -> io::Result<Option<([f32; 3], [f32; 3], [f32; 3], [f32; 4], [f32; 3], f32)>> {
         let mut buffer = vec![0; 1024];
         match self.port.read(&mut buffer) {
             Ok(bytes_read) if bytes_read > 0 => {
                 self.process_data(&buffer[..bytes_read]);
                 // Only return data when we have a complete angle reading
                 if self.frame_state == FrameState::Idle {
-                    Ok(Some((self.acc, self.gyro, self.angle, self.quaternion)))
+                    Ok(Some((
+                        self.acc,
+                        self.gyro,
+                        self.angle,
+                        self.quaternion,
+                        self.mag,
+                        self.temp,
+                    )))
                 } else {
                     Ok(None)
                 }
@@ -196,6 +216,10 @@ impl IMU {
                                 self.frame_state = FrameState::Angle;
                                 self.byte_num = 2;
                             }
+                            0x54 => {
+                                self.frame_state = FrameState::Mag;
+                                self.byte_num = 2;
+                            }
                             0x59 => {
                                 // println!("frame_state: {:?}", self.frame_state);
                                 self.frame_state = FrameState::Quaternion;
@@ -216,6 +240,7 @@ impl IMU {
                     } else {
                         if data == (self.checksum & 0xFF) {
                             self.acc = Self::get_acc(&self.acc_data);
+                            self.temp = Self::get_temperature(&self.acc_data);
                         }
                         self.reset();
                     }
@@ -228,6 +253,18 @@ impl IMU {
                     } else {
                         if data == (self.checksum & 0xFF) {
                             self.gyro = Self::get_gyro(&self.gyro_data);
+                        }
+                        self.reset();
+                    }
+                }
+                FrameState::Mag => {
+                    if self.byte_num < 10 {
+                        self.mag_data[self.byte_num - 2] = data;
+                        self.checksum = self.checksum.wrapping_add(data);
+                        self.byte_num += 1;
+                    } else {
+                        if data == (self.checksum & 0xFF) {
+                            self.mag = Self::get_mag(&self.mag_data);
                         }
                         self.reset();
                     }
@@ -280,7 +317,7 @@ impl IMU {
     }
 
     fn get_gyro(datahex: &[u8; 8]) -> [f32; 3] {
-        let k_gyro = 2000.0 * 3.1415926 / 180.0;
+        let k_gyro = 2000.0 * std::f32::consts::PI / 180.0;
         let gyro_x = i16::from(datahex[1]) << 8 | i16::from(datahex[0]);
         let gyro_y = i16::from(datahex[3]) << 8 | i16::from(datahex[2]);
         let gyro_z = i16::from(datahex[5]) << 8 | i16::from(datahex[4]);
@@ -292,8 +329,20 @@ impl IMU {
         ]
     }
 
+    fn get_mag(datahex: &[u8; 8]) -> [f32; 3] {
+        let mag_x = i16::from_le_bytes([datahex[0], datahex[1]]);
+        let mag_y = i16::from_le_bytes([datahex[2], datahex[3]]);
+        let mag_z = i16::from_le_bytes([datahex[4], datahex[5]]);
+        [mag_x as f32, mag_y as f32, mag_z as f32]
+    }
+
+    fn get_temperature(datahex: &[u8; 8]) -> f32 {
+        let temp_raw = i16::from_le_bytes([datahex[6], datahex[7]]);
+        temp_raw as f32 / 100.0
+    }
+
     fn get_angle(datahex: &[u8; 8]) -> [f32; 3] {
-        let k_angle = 3.1415926;
+        let k_angle = std::f32::consts::PI;
         let angle_x = i16::from(datahex[1]) << 8 | i16::from(datahex[0]);
         let angle_y = i16::from(datahex[3]) << 8 | i16::from(datahex[2]);
         let angle_z = i16::from(datahex[5]) << 8 | i16::from(datahex[4]);
@@ -326,6 +375,8 @@ pub struct ImuData {
     pub gyroscope: [f32; 3],
     pub angle: [f32; 3],
     pub quaternion: [f32; 4],
+    pub magnetometer: [f32; 3],
+    pub temperature: f32,
 }
 
 impl Default for ImuData {
@@ -335,6 +386,8 @@ impl Default for ImuData {
             gyroscope: [0.0; 3],
             angle: [0.0; 3],
             quaternion: [0.0; 4],
+            magnetometer: [0.0; 3],
+            temperature: 0.0,
         }
     }
 }
@@ -420,12 +473,14 @@ impl HiwonderReader {
 
                 // Read IMU data
                 match imu.read_data() {
-                    Ok(Some((acc, gyro, angle, quat))) => {
+                    Ok(Some((acc, gyro, angle, quat, mag, temp))) => {
                         if let Ok(mut imu_data) = data.write() {
                             imu_data.accelerometer = acc;
                             imu_data.gyroscope = gyro;
                             imu_data.angle = angle;
                             imu_data.quaternion = quat;
+                            imu_data.magnetometer = mag;
+                            imu_data.temperature = temp;
                         }
                     }
                     Ok(None) => (), // No complete data available yet
