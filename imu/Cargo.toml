@@ -13,9 +13,10 @@ name = "imu"
 crate-type = ["rlib"]
 
 [dependencies]
-hexmove = "0.1.6"
-hiwonder = "0.3.2"
-linux_bno055 = "0.0.7"
-linux_bmi088 = "0.0.1"
-socketcan = "3.3.0"
 log = "0.4"
+serialport="4.7.1"
+imu-traits = "0.0.1"
+hexmove = "0.2.0"
+hiwonder = "0.4.0"
+linux_bno055 = "0.1.0"
+linux_bmi088 =  "0.1.0"

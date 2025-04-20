@@ -26,11 +26,11 @@ with open("imu/requirements-dev.txt", "r", encoding="utf-8") as f:
     requirements_dev: list[str] = f.read().splitlines()
 
 # Define package data (simplified)
-package_data = {"imu": ["py.typed"]}
+package_data = {"imu": ["py.typed", "*.pyi"]}
 
 
 setup(
-    name="kscale-imu",
+    name="imu-py",
     version=version,
     description="Python interface for interacting with IMUs",
     author="Wesley Maa",
