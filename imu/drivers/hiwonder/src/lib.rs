@@ -1,19 +1,11 @@
+pub mod frame;
+pub mod register;
+pub use frame::*;
 pub use imu_traits::{ImuData, ImuError, ImuFrequency, ImuReader, Quaternion, Vector3};
-use serialport;
-use std::io::{self, Read};
+pub use register::*;
 use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 use std::time::Duration;
-
-#[derive(Debug, PartialEq)]
-enum FrameState {
-    Idle,
-    Acc,
-    Gyro,
-    Angle,
-    Quaternion,
-    Mag,
-}
 
 pub trait FrequencyToByte {
     fn to_byte(&self) -> u8;
@@ -40,20 +32,7 @@ impl FrequencyToByte for ImuFrequency {
 
 pub struct IMU {
     port: Box<dyn serialport::SerialPort>,
-    frame_state: FrameState,
-    byte_num: usize,
-    checksum: u8,
-    acc_data: [u8; 8],
-    gyro_data: [u8; 8],
-    angle_data: [u8; 8],
-    quaternion_data: [u8; 8],
-    mag_data: [u8; 8],
-    acc: [f32; 3],
-    gyro: [f32; 3],
-    angle: [f32; 3],
-    quaternion: [f32; 4],
-    mag: [f32; 3],
-    temp: f32,
+    frame_parser: FrameParser,
 }
 
 impl IMU {
@@ -63,21 +42,8 @@ impl IMU {
             .open()?;
 
         let mut imu = IMU {
-            port: port,
-            frame_state: FrameState::Idle,
-            byte_num: 0,
-            checksum: 0,
-            acc_data: [0u8; 8],
-            gyro_data: [0u8; 8],
-            angle_data: [0u8; 8],
-            quaternion_data: [0u8; 8],
-            mag_data: [0u8; 8],
-            acc: [0.0; 3],
-            gyro: [0.0; 3],
-            angle: [0.0; 3],
-            quaternion: [0.0; 4],
-            mag: [0.0; 3],
-            temp: 0.0,
+            port,
+            frame_parser: FrameParser::new(Some(512)),
         };
 
         imu.initialize()?;
@@ -85,243 +51,56 @@ impl IMU {
     }
 
     fn initialize(&mut self) -> Result<(), ImuError> {
-        // * Set IMU Parameters to Read
-        // Commands as vectors
-        let unlock_cmd = vec![0xFF, 0xAA, 0x69, 0x88, 0xB5];
-        // Enable Acceleration (0x02), Gyro (0x04), Angle (0x08), Mag (0x10), and Quaternion (0x0200)
-        // Low byte: 0x02 | 0x04 | 0x08 | 0x10 = 0x1E
-        // High byte: 0x02
-        // let config_cmd = vec![0xFF, 0xAA, 0x02, 0x1E, 0x02];
-        let config_cmd = vec![0xFF, 0xAA, 0x02, 0xFF, 0x07]; // 0x07FF = all bits set
-        let save_cmd = vec![0xFF, 0xAA, 0x00, 0x00, 0x00];
-
-        // Alternative:
-        // let mut packet = Vec::with_capacity(5 + data.len());
-        // packet.push(0x55); // many of these...
-        // self.port.write_all(&packet)
+        let enabled_outputs = Output::ACC | Output::GYRO | Output::ANGLE | Output::QUATERNION;
 
         // Send commands in sequence.
-        self.write_command(&unlock_cmd)?;
-        self.write_command(&config_cmd)?;
-        self.write_command(&save_cmd)?;
+        self.write_command(&UnlockCommand::new())?; // Unlock
+        self.write_command(&FusionAlgorithmCommand::new(FusionAlgorithm::SixAxis))?; // Axis6
+        self.write_command(&EnableOutputCommand::new(enabled_outputs))?; // Enable
+        self.write_command(&SaveCommand::new())?; // Save
 
         // Set IMU frequency to a reasonable default.
-        self.set_frequency(ImuFrequency::Hz100)?;
+        self.write_command(&SetFrequencyCommand::new(ImuFrequency::Hz100))?;
+
         Ok(())
     }
 
-    fn write_command(&mut self, command: &[u8]) -> Result<(), ImuError> {
-        self.port.write_all(command).map_err(ImuError::from)?;
+    fn write_command(&mut self, command: &dyn Bytable) -> Result<(), ImuError> {
+        self.port
+            .write_all(&command.to_bytes())
+            .map_err(ImuError::from)?;
         // 200 hz -> 5ms
         std::thread::sleep(Duration::from_millis(30));
         Ok(())
     }
 
     pub fn set_frequency(&mut self, frequency: ImuFrequency) -> Result<(), ImuError> {
-        let freq_cmd = vec![0xFF, 0xAA, 0x03, frequency.to_byte(), 0x00];
-        self.write_command(&freq_cmd)?;
+        self.write_command(&UnlockCommand::new())?;
+        self.write_command(&SetFrequencyCommand::new(frequency))?;
+        self.write_command(&SaveCommand::new())?;
         Ok(())
     }
 
-    pub fn read_data(
-        &mut self,
-    ) -> io::Result<Option<([f32; 3], [f32; 3], [f32; 3], [f32; 4], [f32; 3], f32)>> {
-        let mut buffer = vec![0; 1024];
+    pub fn set_baud_rate(&mut self, baud_rate: u32) -> Result<(), ImuError> {
+        self.write_command(&UnlockCommand::new())?;
+        self.write_command(&SetBaudRateCommand::new(BaudRate::try_from(baud_rate)?))?;
+        self.write_command(&SaveCommand::new())?;
+        self.port.set_baud_rate(baud_rate)?;
+        Ok(())
+    }
+
+    pub fn get_frames(&mut self) -> Result<Vec<ReadFrame>, ImuError> {
+        let mut buffer = [0u8; 1024];
         match self.port.read(&mut buffer) {
-            Ok(bytes_read) if bytes_read > 0 => {
-                self.process_data(&buffer[..bytes_read]);
-                // Only return data when we have a complete angle reading
-                if self.frame_state == FrameState::Idle {
-                    Ok(Some((
-                        self.acc,
-                        self.gyro,
-                        self.angle,
-                        self.quaternion,
-                        self.mag,
-                        self.temp,
-                    )))
+            Ok(n) => {
+                if n > 0 {
+                    Ok(self.frame_parser.parse(&buffer[0..n])?)
                 } else {
-                    Ok(None)
+                    Ok(vec![])
                 }
             }
-            Ok(_) => Ok(None),
-            Err(e) => Err(e),
+            Err(e) => Err(ImuError::ReadError(format!("Failed to read data: {}", e))),
         }
-    }
-
-    pub fn process_data(&mut self, input_data: &[u8]) {
-        for &data in input_data {
-            match self.frame_state {
-                FrameState::Idle => {
-                    if data == 0x55 && self.byte_num == 0 {
-                        self.checksum = data;
-                        self.byte_num = 1;
-                        continue;
-                    } else if self.byte_num == 1 {
-                        self.checksum = self.checksum.wrapping_add(data);
-                        match data {
-                            0x51 => {
-                                self.frame_state = FrameState::Acc;
-                                self.byte_num = 2;
-                            }
-                            0x52 => {
-                                self.frame_state = FrameState::Gyro;
-                                self.byte_num = 2;
-                            }
-                            0x53 => {
-                                self.frame_state = FrameState::Angle;
-                                self.byte_num = 2;
-                            }
-                            0x54 => {
-                                self.frame_state = FrameState::Mag;
-                                self.byte_num = 2;
-                            }
-                            0x59 => {
-                                // println!("frame_state: {:?}", self.frame_state);
-                                self.frame_state = FrameState::Quaternion;
-                                self.byte_num = 2;
-                            }
-                            _ => {
-                                self.reset();
-                            }
-                        }
-                    }
-                }
-                // 11 bytes per packet for all, including the SOF.
-                FrameState::Acc => {
-                    if self.byte_num < 10 {
-                        self.acc_data[self.byte_num - 2] = data;
-                        self.checksum = self.checksum.wrapping_add(data);
-                        self.byte_num += 1;
-                    } else {
-                        if data == (self.checksum & 0xFF) {
-                            self.acc = Self::get_acc(&self.acc_data);
-                            self.temp = Self::get_temperature(&self.acc_data);
-                        }
-                        self.reset();
-                    }
-                }
-                FrameState::Gyro => {
-                    if self.byte_num < 10 {
-                        self.gyro_data[self.byte_num - 2] = data;
-                        self.checksum = self.checksum.wrapping_add(data);
-                        self.byte_num += 1;
-                    } else {
-                        if data == (self.checksum & 0xFF) {
-                            self.gyro = Self::get_gyro(&self.gyro_data);
-                        }
-                        self.reset();
-                    }
-                }
-                FrameState::Mag => {
-                    if self.byte_num < 10 {
-                        self.mag_data[self.byte_num - 2] = data;
-                        self.checksum = self.checksum.wrapping_add(data);
-                        self.byte_num += 1;
-                    } else {
-                        if data == (self.checksum & 0xFF) {
-                            self.mag = Self::get_mag(&self.mag_data);
-                        }
-                        self.reset();
-                    }
-                }
-                FrameState::Angle => {
-                    if self.byte_num < 10 {
-                        self.angle_data[self.byte_num - 2] = data;
-                        self.checksum = self.checksum.wrapping_add(data);
-                        self.byte_num += 1;
-                    } else {
-                        if data == (self.checksum & 0xFF) {
-                            self.angle = Self::get_angle(&self.angle_data);
-                        }
-                        self.reset();
-                    }
-                }
-                FrameState::Quaternion => {
-                    if self.byte_num < 10 {
-                        self.quaternion_data[self.byte_num - 2] = data;
-                        self.checksum = self.checksum.wrapping_add(data);
-                        self.byte_num += 1;
-                    } else {
-                        if data == (self.checksum & 0xFF) {
-                            self.quaternion = Self::get_quaternion(&self.quaternion_data);
-                        }
-                        self.reset();
-                    }
-                }
-            }
-        }
-    }
-
-    fn reset(&mut self) {
-        self.frame_state = FrameState::Idle;
-        self.byte_num = 0;
-        self.checksum = 0;
-    }
-
-    fn get_acc(datahex: &[u8; 8]) -> [f32; 3] {
-        let k_acc = 16.0 * 9.80665;
-        let acc_x = i16::from(datahex[1]) << 8 | i16::from(datahex[0]);
-        let acc_y = i16::from(datahex[3]) << 8 | i16::from(datahex[2]);
-        let acc_z = i16::from(datahex[5]) << 8 | i16::from(datahex[4]);
-
-        [
-            acc_x as f32 / 32768.0 * k_acc,
-            acc_y as f32 / 32768.0 * k_acc,
-            acc_z as f32 / 32768.0 * k_acc,
-        ]
-    }
-
-    fn get_gyro(datahex: &[u8; 8]) -> [f32; 3] {
-        let k_gyro = 2000.0 * std::f32::consts::PI / 180.0;
-        let gyro_x = i16::from(datahex[1]) << 8 | i16::from(datahex[0]);
-        let gyro_y = i16::from(datahex[3]) << 8 | i16::from(datahex[2]);
-        let gyro_z = i16::from(datahex[5]) << 8 | i16::from(datahex[4]);
-
-        [
-            gyro_x as f32 / 32768.0 * k_gyro,
-            gyro_y as f32 / 32768.0 * k_gyro,
-            gyro_z as f32 / 32768.0 * k_gyro,
-        ]
-    }
-
-    fn get_mag(datahex: &[u8; 8]) -> [f32; 3] {
-        let mag_x = i16::from_le_bytes([datahex[0], datahex[1]]);
-        let mag_y = i16::from_le_bytes([datahex[2], datahex[3]]);
-        let mag_z = i16::from_le_bytes([datahex[4], datahex[5]]);
-        [mag_x as f32, mag_y as f32, mag_z as f32]
-    }
-
-    fn get_temperature(datahex: &[u8; 8]) -> f32 {
-        let temp_raw = i16::from_le_bytes([datahex[6], datahex[7]]);
-        temp_raw as f32 / 100.0
-    }
-
-    fn get_angle(datahex: &[u8; 8]) -> [f32; 3] {
-        let k_angle = std::f32::consts::PI;
-        let angle_x = i16::from(datahex[1]) << 8 | i16::from(datahex[0]);
-        let angle_y = i16::from(datahex[3]) << 8 | i16::from(datahex[2]);
-        let angle_z = i16::from(datahex[5]) << 8 | i16::from(datahex[4]);
-
-        [
-            angle_x as f32 / 32768.0 * k_angle,
-            angle_y as f32 / 32768.0 * k_angle,
-            angle_z as f32 / 32768.0 * k_angle,
-        ]
-    }
-
-    fn get_quaternion(datahex: &[u8; 8]) -> [f32; 4] {
-        let quaternion_w = i16::from(datahex[1]) << 8 | i16::from(datahex[0]);
-        let quaternion_x = i16::from(datahex[3]) << 8 | i16::from(datahex[2]);
-        let quaternion_y = i16::from(datahex[5]) << 8 | i16::from(datahex[4]);
-        let quaternion_z = i16::from(datahex[7]) << 8 | i16::from(datahex[6]);
-
-        [
-            quaternion_x as f32 / 32768.0,
-            quaternion_y as f32 / 32768.0,
-            quaternion_z as f32 / 32768.0,
-            quaternion_w as f32 / 32768.0,
-        ]
     }
 }
 
@@ -336,6 +115,7 @@ pub enum ImuCommand {
     Reset,
     Stop,
     SetFrequency(ImuFrequency),
+    SetBaudRate(u32),
 }
 
 impl HiwonderReader {
@@ -374,7 +154,8 @@ impl HiwonderReader {
                 let _ = tx.send(Err(e));
                 return;
             }
-            let mut imu = init_result.unwrap();
+
+            let mut imu = init_result.unwrap(); // This is safe because we have already checked for errors
             let _ = tx.send(Ok(()));
 
             while let Ok(guard) = running.read() {
@@ -401,58 +182,69 @@ impl HiwonderReader {
                                 eprintln!("Failed to set frequency: {}", e);
                             }
                         }
+                        ImuCommand::SetBaudRate(baud_rate) => {
+                            if let Err(e) = imu.set_baud_rate(baud_rate) {
+                                eprintln!("Failed to set baud rate: {}", e);
+                            }
+                        }
                     }
                 }
 
                 // Read IMU data
-                match imu.read_data() {
-                    Ok(Some((acc, gyro, angle, quat, mag, temp))) => {
-                        if let Ok(mut imu_data) = data.write() {
-                            imu_data.accelerometer = Some(Vector3 {
-                                x: acc[0],
-                                y: acc[1],
-                                z: acc[2],
-                            });
-                            imu_data.gyroscope = Some(Vector3 {
-                                x: gyro[0],
-                                y: gyro[1],
-                                z: gyro[2],
-                            });
-                            imu_data.euler = Some(Vector3 {
-                                x: angle[0],
-                                y: angle[1],
-                                z: angle[2],
-                            });
-                            imu_data.quaternion = Some(Quaternion {
-                                w: quat[3],
-                                x: quat[0],
-                                y: quat[1],
-                                z: quat[2],
-                            });
-                            imu_data.magnetometer = Some(Vector3 {
-                                x: mag[0],
-                                y: mag[1],
-                                z: mag[2],
-                            });
-                            imu_data.temperature = Some(temp);
+                match imu.get_frames() {
+                    Ok(frames) => {
+                        for frame in frames {
+                            if let Ok(mut imu_data) = data.write() {
+                                match frame {
+                                    ReadFrame::Acceleration { x, y, z, temp: _ } => {
+                                        imu_data.accelerometer = Some(Vector3 { x, y, z });
+                                    }
+                                    ReadFrame::Gyro {
+                                        x,
+                                        y,
+                                        z,
+                                        voltage: _,
+                                    } => {
+                                        imu_data.gyroscope = Some(Vector3 { x, y, z });
+                                    }
+                                    ReadFrame::Angle {
+                                        roll,
+                                        pitch,
+                                        yaw,
+                                        version: _,
+                                    } => {
+                                        imu_data.euler = Some(Vector3 {
+                                            x: roll,
+                                            y: pitch,
+                                            z: yaw,
+                                        });
+                                    }
+                                    ReadFrame::Magnetometer { x, y, z, temp: _ } => {
+                                        imu_data.magnetometer = Some(Vector3 { x, y, z });
+                                    }
+                                    ReadFrame::Quaternion { w, x, y, z } => {
+                                        imu_data.quaternion = Some(Quaternion { w, x, y, z });
+                                    }
+                                    _ => (),
+                                }
+                            } else {
+                                eprintln!("Failed to write to IMU data");
+                            }
                         }
                     }
-                    Ok(None) => (), // No complete data available yet
                     Err(e) => eprintln!("Error reading from IMU: {}", e),
                 }
 
                 // Sleep for a short duration to prevent busy waiting
-                // Max frequency is 200hz, so 5ms is the max delay
-                thread::sleep(Duration::from_millis(5));
+                // Max frequency is 200hz (5ms)
+                thread::sleep(Duration::from_millis(4));
             }
         });
 
         // Wait for initialization result before returning
-        rx.recv()
-            .map_err(|_| {
-                ImuError::InvalidPacket("Failed to receive initialization result".to_string())
-            })?
-            .map_err(|e| e)
+        rx.recv().map_err(|_| {
+            ImuError::InvalidPacket("Failed to receive initialization result".to_string())
+        })?
     }
 
     pub fn reset(&self) -> Result<(), ImuError> {
@@ -464,6 +256,11 @@ impl HiwonderReader {
         self.command_tx.send(ImuCommand::SetFrequency(frequency))?;
         Ok(())
     }
+
+    pub fn set_baud_rate(&self, baud_rate: u32) -> Result<(), ImuError> {
+        self.command_tx.send(ImuCommand::SetBaudRate(baud_rate))?;
+        Ok(())
+    }
 }
 
 impl ImuReader for HiwonderReader {
@@ -473,10 +270,14 @@ impl ImuReader for HiwonderReader {
     }
 
     fn get_data(&self) -> Result<ImuData, ImuError> {
-        self.data
+        // Get the data
+        let result = self
+            .data
             .read()
-            .map(|data| data.clone())
-            .map_err(|_| ImuError::ReadError("Lock error".to_string()))
+            .map(|data| *data)
+            .map_err(|_| ImuError::ReadError("Lock error".to_string()));
+
+        result
     }
 }
 

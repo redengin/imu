@@ -6,13 +6,14 @@ members = [
     "imu/bindings",
     "imu/drivers/hexmove",
     "imu/drivers/hiwonder",
+    "imu/drivers/hiwonder/hiwonder_macros",
     "imu/drivers/bno055",
     "imu/drivers/bmi088",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.6.0"
+version = "0.6.2"
 authors = ["Wesley Maa <wesley@kscale.dev>"]
 edition = "2021"
 description = "IMU package"
