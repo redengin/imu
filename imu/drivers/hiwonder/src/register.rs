@@ -1,9 +1,10 @@
 use bitflags::bitflags;
-use hiwonder_macros::{BytableCommand, DefaultableCommand};
+use hiwonder_macros::{BytableRegistrableCommand, DefaultableCommand, Registrable};
 use imu_traits::{ImuError, ImuFrequency};
+use strum_macros::EnumIter;
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
 pub enum Register {
     Save = 0x00,
     CalSw = 0x01,        // Calibration mode
@@ -111,6 +112,14 @@ pub enum Register {
 pub trait Bytable {
     fn to_bytes(&self) -> Vec<u8>;
 }
+
+pub trait Registrable {
+    fn register(&self) -> Register;
+}
+
+pub trait BytableRegistrable: Bytable + Registrable {}
+
+#[derive(Registrable)]
 pub struct Command {
     pub register: Register,
     pub data: [u8; 2],
@@ -138,7 +147,7 @@ impl Default for Command {
 }
 
 // Common commands
-#[derive(BytableCommand, DefaultableCommand)]
+#[derive(BytableRegistrableCommand, DefaultableCommand)]
 pub struct UnlockCommand {
     pub command: Command,
 }
@@ -150,7 +159,25 @@ impl UnlockCommand {
     }
 }
 
-#[derive(BytableCommand)]
+#[derive(BytableRegistrableCommand)]
+pub struct ReadAddressCommand {
+    pub command: Command,
+}
+
+impl ReadAddressCommand {
+    pub fn new(register: Register) -> Self {
+        let command = Command::new(Register::ReadAddr, [register as u8, 0x00]);
+        Self { command }
+    }
+}
+
+impl Default for ReadAddressCommand {
+    fn default() -> Self {
+        Self::new(Register::IicAddr)
+    }
+}
+
+#[derive(BytableRegistrableCommand)]
 pub struct FusionAlgorithmCommand {
     pub command: Command,
 }
@@ -177,13 +204,14 @@ impl Default for FusionAlgorithmCommand {
     }
 }
 
-#[derive(BytableCommand)]
+#[derive(BytableRegistrableCommand)]
 pub struct EnableOutputCommand {
     pub command: Command,
 }
 
+// Note that the Hiwonder imu will reject an empty flag set.
 bitflags! {
-    #[derive(Debug)]
+    #[derive(Debug, Copy, Clone)]
     pub struct Output: u16 {
         const TIME = 1 << 0; // 0x50
         const ACC = 1 << 1; // 0x51
@@ -214,7 +242,7 @@ impl Default for EnableOutputCommand {
     }
 }
 
-#[derive(BytableCommand, DefaultableCommand)]
+#[derive(BytableRegistrableCommand, DefaultableCommand)]
 pub struct SaveCommand {
     pub command: Command,
 }
@@ -226,7 +254,7 @@ impl SaveCommand {
     }
 }
 
-#[derive(BytableCommand, DefaultableCommand)]
+#[derive(BytableRegistrableCommand, DefaultableCommand)]
 pub struct RebootCommand {
     pub command: Command,
 }
@@ -238,7 +266,7 @@ impl RebootCommand {
     }
 }
 
-#[derive(BytableCommand, DefaultableCommand)]
+#[derive(BytableRegistrableCommand, DefaultableCommand)]
 pub struct FactoryResetCommand {
     pub command: Command,
 }
@@ -269,7 +297,7 @@ impl Bytable for ImuFrequency {
     }
 }
 
-#[derive(BytableCommand)]
+#[derive(BytableRegistrableCommand)]
 pub struct SetFrequencyCommand {
     pub command: Command,
 }
@@ -288,11 +316,12 @@ impl Default for SetFrequencyCommand {
     }
 }
 
-#[derive(BytableCommand)]
+#[derive(BytableRegistrableCommand)]
 pub struct SetBaudRateCommand {
     pub command: Command,
 }
 
+#[derive(Debug, Clone)]
 pub enum BaudRate {
     Baud4800,
     Baud9600,
@@ -329,6 +358,24 @@ impl TryFrom<u32> for BaudRate {
     }
 }
 
+impl TryInto<u32> for BaudRate {
+    type Error = ImuError;
+
+    fn try_into(self) -> Result<u32, Self::Error> {
+        Ok(match self {
+            BaudRate::Baud4800 => 4800,
+            BaudRate::Baud9600 => 9600,
+            BaudRate::Baud19200 => 19200,
+            BaudRate::Baud38400 => 38400,
+            BaudRate::Baud57600 => 57600,
+            BaudRate::Baud115200 => 115200,
+            BaudRate::Baud230400 => 230400,
+            BaudRate::Baud460800 => 460800,
+            BaudRate::Baud921600 => 921600,
+        })
+    }
+}
+
 impl Bytable for BaudRate {
     fn to_bytes(&self) -> Vec<u8> {
         match self {
@@ -356,5 +403,65 @@ impl SetBaudRateCommand {
 impl Default for SetBaudRateCommand {
     fn default() -> Self {
         Self::new(BaudRate::Baud230400)
+    }
+}
+
+/// Represents the configurable bandwidth settings of the IMU.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Bandwidth {
+    Hz256 = 0x00,
+    Hz188 = 0x01,
+    Hz98 = 0x02,
+    Hz42 = 0x03,
+    Hz20 = 0x04,
+    Hz10 = 0x05,
+    Hz5 = 0x06,
+}
+
+impl Bytable for Bandwidth {
+    fn to_bytes(&self) -> Vec<u8> {
+        vec![*self as u8, 0x00]
+    }
+}
+
+impl TryFrom<u32> for Bandwidth {
+    type Error = ImuError;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        Ok(match value {
+            256 => Bandwidth::Hz256,
+            188 => Bandwidth::Hz188,
+            98 => Bandwidth::Hz98,
+            42 => Bandwidth::Hz42,
+            20 => Bandwidth::Hz20,
+            10 => Bandwidth::Hz10,
+            5 => Bandwidth::Hz5,
+            _ => {
+                return Err(ImuError::ConfigurationError(format!(
+                    "Invalid bandwidth: {}",
+                    value
+                )))
+            }
+        })
+    }
+}
+
+#[derive(BytableRegistrableCommand)]
+pub struct SetBandwidthCommand {
+    pub command: Command,
+}
+
+impl SetBandwidthCommand {
+    pub fn new(bandwidth: Bandwidth) -> Self {
+        let data = bandwidth.to_bytes();
+        let command = Command::new(Register::Bandwidth, [data[0], data[1]]);
+        Self { command }
+    }
+}
+
+impl Default for SetBandwidthCommand {
+    fn default() -> Self {
+        Self::new(Bandwidth::Hz42)
     }
 }

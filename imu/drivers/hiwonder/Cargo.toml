@@ -1,6 +1,6 @@
 [package]
 name = "hiwonder"
-version = "0.5.1"
+version = "0.6.0"
 readme = "README.md"
 description = "Interface for interacting with Hiwonder IMUs"
 edition = "2021"
@@ -11,9 +11,13 @@ license.workspace = true
 [dependencies]
 serialport = "4.2.0"
 imu-traits = "0.0.2"
-hiwonder_macros = "0.1.0"
+hiwonder_macros = "0.1.6"
 bitflags = "2.9.0"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 clap = { version = "4.5.37", features = ["derive"] }
+strum = "0.27.1"
+strum_macros = "0.27.1"
 
 [lib]
 
