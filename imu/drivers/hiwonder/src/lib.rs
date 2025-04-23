@@ -756,7 +756,6 @@ impl HiwonderReader {
                 errors.len(),
                 register_count - errors.len()
             ); // Adjust count based on skipped
-               // Depending on requirements, you might want to return the partial results along with the errors.
                // For now, returning a generic error indicating partial failure.
             Err(ImuError::ReadError(format!(
                 "Failed to read {} registers. First error on {:?}: {}",
