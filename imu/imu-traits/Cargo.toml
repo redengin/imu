@@ -14,4 +14,9 @@ crate-type = ["rlib"]
 
 [dependencies]
 log = "0.4"
-serialport="4.7.1"
+serialport= { version="4.7.1", optional=true }
+
+[features]
+std = ["serialport"]
+nostd = []
+high_accuracy = []  # use f64 instead of f32
