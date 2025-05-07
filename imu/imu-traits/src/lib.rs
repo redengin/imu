@@ -2,19 +2,9 @@
 #[cfg(feature="std")]
     extern crate std;
 
-// FIXME don't alias these (it's not necessary)
-#[cfg(feature="std")]
-use std::error::Error as StdError;
-#[cfg(feature="std")]
-use std::fmt;
-#[cfg(feature="std")]
-use std::io;
-#[cfg(feature="std")]
-use std::sync::mpsc;
-
-#[cfg(feature="high_accuracy")]
+#[cfg(feature="high_precision")]
 type Float = f64;
-#[cfg(not(feature="high_accuracy"))]
+#[cfg(not(feature="high_precision"))]
 type Float = f32;
 
 
@@ -25,6 +15,18 @@ pub struct Vector3 {
     pub y: Float,
     pub z: Float,
 }
+impl Vector3 {
+    pub fn new(x: Float, y: Float, z: Float) -> Self {
+        Self { x, y, z }
+    }
+}
+#[cfg(feature="std")]
+impl fmt::Display for Vector3 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Vector3(x={}, y={}, z={})", self.x, self.y, self.z)
+    }
+}
+// TODO provide no_std to_string()
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Quaternion {
@@ -33,41 +35,17 @@ pub struct Quaternion {
     pub y: Float,
     pub z: Float,
 }
-
-impl Vector3 {
-    pub fn new(x: Float, y: Float, z: Float) -> Self {
-        Self { x, y, z }
-    }
-
-    // pub fn euler_to_quaternion(&self) -> Quaternion {
-    //     // Convert Euler angles (in radians) to quaternion
-    //     // Using the ZYX rotation order (yaw, pitch, roll)
-    //     let (roll, pitch, yaw) = (self.x, self.y, self.z);
-
-    //     let cr = (roll * 0.5).cos();
-    //     let sr = (roll * 0.5).sin();
-    //     let cp = (pitch * 0.5).cos();
-    //     let sp = (pitch * 0.5).sin();
-    //     let cy = (yaw * 0.5).cos();
-    //     let sy = (yaw * 0.5).sin();
-
-    //     let w = cr * cp * cy + sr * sp * sy;
-    //     let x = sr * cp * cy - cr * sp * sy;
-    //     let y = cr * sp * cy + sr * cp * sy;
-    //     let z = cr * cp * sy - sr * sp * cy;
-
-    //     Quaternion { w, x, y, z }
-    // }
-}
-
 #[cfg(feature="std")]
-impl fmt::Display for Vector3 {
+impl fmt::Display for Quaternion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Vector3(x={}, y={}, z={})", self.x, self.y, self.z)
+        write!(f, "Quaternion(w={}, x={}, y={}, z={})", self.w, self.x, self.y, self.z)
     }
 }
+// TODO provide no_std to_string()
+
 
 impl Quaternion {
+    // TODO use optimized math cargo
     pub fn rotate(&self, vector: Vector3) -> Vector3 {
         // Rotate a vector by a quaternion using the formula:
         // v' = q * v * q^-1
@@ -95,16 +73,6 @@ impl Quaternion {
     }
 }
 
-#[cfg(feature="std")]
-impl fmt::Display for Quaternion {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Quaternion(w={}, x={}, y={}, z={})",
-            self.w, self.x, self.y, self.z
-        )
-    }
-}
 
 // --- Standard IMU Data ---
 #[derive(Debug, Clone, Copy, Default)]
@@ -115,98 +83,32 @@ pub struct ImuData {
     pub gyroscope: Option<Vector3>,
     /// Magnetic field vector (micro Tesla, µT)
     pub magnetometer: Option<Vector3>,
-    /// Orientation as a unit quaternion (WXYZ order)
-    pub quaternion: Option<Quaternion>,
-    /// Orientation as Euler angles (deg)
-    pub euler: Option<Vector3>,
-    /// Linear acceleration (acceleration without gravity) (m/s²)
-    pub linear_acceleration: Option<Vector3>,
-    /// Estimated gravity vector (m/s²)
-    pub gravity: Option<Vector3>,
     /// Temperature (°C)
-    pub temperature: Option<f32>,
-    /// Calibration status
-    pub calibration_status: Option<u8>,
+    pub temperature: Option<Float>,
+// FIXME enable these if they are useful
+    // /// Orientation as a unit quaternion (WXYZ order)
+    // pub orientation: Option<Quaternion>,
+    // /// Orientation as Euler angles (deg)
+    // pub euler: Option<Vector3>,
+    // /// Linear acceleration (acceleration without gravity) (m/s²)
+    // pub linear_acceleration: Option<Vector3>,
+    // /// Estimated gravity vector (m/s²)
+    // pub gravity: Option<Vector3>,
+    // /// Calibration status
+    // pub calibration_status: Option<u8>,
 }
-
-// --- Standard Error Type ---
-#[derive(Debug)]
-pub enum ImuError {
-    // /// Error originating from the underlying device communication (I2C, Serial, CAN)
-    // DeviceError(String),
-    // /// Error reading data from the device or internal state
-    // ReadError(String),
-    // /// Error writing commands or configuration to the device
-    // WriteError(String),
-    // /// Error during device configuration or setup
-    // ConfigurationError(String),
-    // /// Error related to multithreading locks (e.g., poisoned)
-    // LockError(String),
-    // /// Error sending a command to the reader thread
-    // CommandSendError(String),
-    // /// Functionality not supported by this specific IMU implementation
-    // NotSupported(String),
-    // /// Invalid packet received from the device
-    // InvalidPacket(String),
-    // /// Catch-all for other errors
-    // Other(String),
-}
-
-#[cfg(feature="std")]
-impl fmt::Display for ImuError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ImuError::DeviceError(s) => write!(f, "Device error: {}", s),
-            ImuError::ReadError(s) => write!(f, "Read error: {}", s),
-            ImuError::WriteError(s) => write!(f, "Write error: {}", s),
-            ImuError::ConfigurationError(s) => write!(f, "Configuration error: {}", s),
-            ImuError::LockError(s) => write!(f, "Lock error: {}", s),
-            ImuError::CommandSendError(s) => write!(f, "Command send error: {}", s),
-            ImuError::NotSupported(s) => write!(f, "Not supported: {}", s),
-            ImuError::InvalidPacket(s) => write!(f, "Invalid packet: {}", s),
-            ImuError::Other(s) => write!(f, "Other IMU error: {}", s),
-        }
-    }
-}
-
-// impl StdError for ImuError {}
-
-// // Add From implementations for common error types
-// impl From<io::Error> for ImuError {
-//     fn from(err: io::Error) -> Self {
-//         ImuError::DeviceError(err.to_string())
-//     }
-// }
-
-// impl From<serialport::Error> for ImuError {
-//     fn from(err: serialport::Error) -> Self {
-//         ImuError::DeviceError(err.to_string())
-//     }
-// }
-
-// impl<T> From<std::sync::PoisonError<T>> for ImuError {
-//     fn from(err: std::sync::PoisonError<T>) -> Self {
-//         ImuError::LockError(err.to_string())
-//     }
-// }
-
-// impl<T> From<mpsc::SendError<T>> for ImuError {
-//     fn from(err: mpsc::SendError<T>) -> Self {
-//         ImuError::CommandSendError(err.to_string())
-//     }
-// }
-
-// impl From<mpsc::RecvError> for ImuError {
-//     fn from(err: mpsc::RecvError) -> Self {
-//         ImuError::CommandSendError(err.to_string())
-//     }
-// }
 
 pub trait ImuReader {
     /// Retrieves the latest available IMU data.
-    fn get_data(&self) -> Result<ImuData, ImuError>;
+    /// assumes IMU driver has logged the error reason
+    fn get_data(&self) -> Option<ImuData>;
 
-    fn stop(&self) -> Result<(), ImuError>;
+    /// place the IMU into sensing mode
+    /// ImuReader initialization should leave device in low-power mode
+    fn start(&self);
+
+    /// place the IMU into low-power more (disable sensing)
+    fn stop(&self);
 }
 
 #[derive(Debug, Clone, Copy)]

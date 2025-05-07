@@ -19,4 +19,4 @@ serialport= { version="4.7.1", optional=true }
 [features]
 std = ["serialport"]
 nostd = []
-high_accuracy = []  # use f64 instead of f32
+high_precision = []  # use f64 instead of f32
